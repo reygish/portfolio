@@ -138,6 +138,7 @@ const photoFragment = /* glsl */ `
   uniform float uReveal;
   uniform float uTime;
   uniform float uOffset;
+  uniform float uAppear;
   uniform vec3 uTint;
   varying vec2 vUv;
 
@@ -163,15 +164,20 @@ const photoFragment = /* glsl */ `
     vec2 d = abs(vUv - 0.5) * 2.0;
     float frame = (1.0 - smoothstep(0.62, 1.0, d.x)) * (1.0 - smoothstep(0.62, 1.0, d.y));
 
-    // Cards resolve in sequence as the shell opens.
+    // Cards resolve in sequence as the shell opens. uAppear ramps once on
+    // mount so a slow-loading photo still fades in rather than popping.
     float gate = smoothstep(0.2 + uOffset, 0.8 + uOffset, uReveal);
 
-    float alpha = tex.a * gate * frame * 0.9;
+    float alpha = tex.a * gate * frame * uAppear * 0.9;
     gl_FragColor = vec4(holo, alpha);
   }
 `;
 
 interface Photo {
+  /** Stable identity, so a card is never re-keyed onto another photo. */
+  url: string;
+  /** Position in the gallery list, which fixes where the card sits. */
+  index: number;
   texture: THREE.Texture;
   aspect: number;
 }
@@ -179,6 +185,10 @@ interface Photo {
 /**
  * Loads every gallery image, skipping any that are missing so a partial set
  * still renders. Results stream in as each file arrives.
+ *
+ * Images are written into fixed slots rather than appended, because over a
+ * network they finish out of order — appending would shuffle which photo owns
+ * which position every time one arrived.
  */
 function useGallery(urls: string[]): Photo[] {
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -187,9 +197,9 @@ function useGallery(urls: string[]): Photo[] {
     if (urls.length === 0) return;
     let cancelled = false;
     const loader = new THREE.TextureLoader();
-    const loaded: Photo[] = [];
+    const slots: (Photo | null)[] = urls.map(() => null);
 
-    urls.forEach((url) => {
+    urls.forEach((url, index) => {
       loader.load(
         url,
         (tex) => {
@@ -203,8 +213,9 @@ function useGallery(urls: string[]): Photo[] {
             | undefined;
           const aspect =
             img?.width && img?.height ? img.width / img.height : 0.75;
-          loaded.push({ texture: tex, aspect });
-          setPhotos([...loaded]);
+
+          slots[index] = { url, index, texture: tex, aspect };
+          setPhotos(slots.filter((p): p is Photo => p !== null));
         },
         undefined,
         () => {
@@ -254,6 +265,7 @@ function PhotoCard({
 }) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const meshRef = useRef<THREE.Mesh>(null);
+  const appearRef = useRef(0);
 
   const uniforms = useMemo(
     () => ({
@@ -261,18 +273,28 @@ function PhotoCard({
       uReveal: { value: 0 },
       uTime: { value: 0 },
       uOffset: { value: offset },
+      uAppear: { value: 0 },
       uTint: { value: new THREE.Color('#7ea8ff') },
     }),
     [photo.texture, offset],
   );
 
-  useFrame((state) => {
+  // A material's uniforms are bound at construction, so assign the texture
+  // directly as well in case this card outlives a texture swap.
+  useEffect(() => {
+    if (matRef.current) matRef.current.uniforms.uMap.value = photo.texture;
+  }, [photo.texture]);
+
+  useFrame((state, delta) => {
     const { reveal, dim } = rig.current;
     const gate = reveal * (1 - dim);
+
+    appearRef.current = Math.min(1, appearRef.current + delta / 0.7);
 
     if (matRef.current) {
       matRef.current.uniforms.uReveal.value = gate;
       matRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+      matRef.current.uniforms.uAppear.value = appearRef.current;
     }
     if (meshRef.current) {
       meshRef.current.visible = gate > 0.02;
@@ -309,30 +331,33 @@ function PhotoCloud({ rig }: { rig: React.MutableRefObject<RigState> }) {
 
   const photos = useGallery(urls);
 
+  // Layout is derived from the full gallery list, not from what has loaded, so
+  // a card's position is fixed the moment its slot exists and never moves as
+  // the rest of the album arrives.
   const layout = useMemo(() => {
-    const count = photos.length;
+    const count = urls.length;
     const total = Math.max(count, 3);
     // Widen the orbit as the album grows so cards keep their spacing.
     const radius = PHOTO_RADIUS * Math.max(1, Math.sqrt(count / 8));
 
-    return photos.map((_, i) => ({
+    return urls.map((_, i) => ({
       // Jitter the radius so cards sit at varied depths instead of on one
       // shell, which keeps them from stacking up when projected to screen.
       position: spherePoint(i, total, radius + (hashUnit(i) - 0.5) * 0.3),
       offset: (i / Math.max(count, 1)) * 0.15,
     }));
-  }, [photos.length]);
+  }, [urls]);
 
   if (photos.length === 0) return null;
 
   return (
     <group>
-      {photos.map((photo, i) => (
+      {photos.map((photo) => (
         <PhotoCard
-          key={i}
+          key={photo.url}
           photo={photo}
-          position={layout[i].position}
-          offset={layout[i].offset}
+          position={layout[photo.index].position}
+          offset={layout[photo.index].offset}
           rig={rig}
         />
       ))}
