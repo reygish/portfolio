@@ -4,6 +4,7 @@ import Hud from '@/components/layout/Hud';
 import Modal from '@/components/layout/Modal';
 import { type SectionId } from '@/components/layout/NodeNav';
 import SceneBackground from '@/three/SceneBackground';
+import ReducedMotionNotice from '@/components/layout/ReducedMotionNotice';
 import { revealProgress } from '@/three/revealProgress';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { useScrollStage } from '@/hooks/useScrollStage';
@@ -79,6 +80,8 @@ export default function App() {
           {panel.body}
         </Modal>
       ))}
+
+      <ReducedMotionNotice />
     </>
   );
 }

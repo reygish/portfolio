@@ -1,33 +1,44 @@
 import { useEffect, useState } from 'react';
 
+export type ReducedMotionReason = 'none' | 'preference' | 'low-power';
+
+interface ReducedMotionState {
+  reduced: boolean;
+  reason: ReducedMotionReason;
+}
+
+function getState(): ReducedMotionState {
+  if (typeof window === 'undefined') return { reduced: false, reason: 'none' };
+
+  const prefersReduced =
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  if (prefersReduced) return { reduced: true, reason: 'preference' };
+
+  const cores = navigator.hardwareConcurrency ?? 8;
+  if (cores > 0 && cores <= 4) return { reduced: true, reason: 'low-power' };
+
+  return { reduced: false, reason: 'none' };
+}
+
 /**
- * Returns true when the user has requested reduced motion, or when the
- * device appears to be low-powered (few CPU cores / small screen).
+ * Reports whether animation should be reduced, and why: the user's OS
+ * `prefers-reduced-motion` setting, or a low-power device heuristic.
  * Components use this to fall back to lighter visuals.
  */
-export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState<boolean>(() => getInitial());
+export function useReducedMotionState(): ReducedMotionState {
+  const [state, setState] = useState<ReducedMotionState>(() => getState());
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const onChange = () => setReduced(getInitial());
+    const onChange = () => setState(getState());
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
-  return reduced;
+  return state;
 }
 
-function getInitial(): boolean {
-  if (typeof window === 'undefined') return false;
-
-  const prefersReduced =
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-
-  // Heuristic for low-power devices: very few logical cores.
-  const cores = navigator.hardwareConcurrency ?? 8;
-  const lowPower = cores > 0 && cores <= 4;
-
-  return prefersReduced || lowPower;
+export function useReducedMotion(): boolean {
+  return useReducedMotionState().reduced;
 }
