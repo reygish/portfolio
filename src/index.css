@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background-color: #050507;
+  }
+
+  body {
+    @apply bg-base text-ink font-sans antialiased;
+  }
+
+  ::selection {
+    background-color: #2f6bff;
+    color: #f4f5f7;
+  }
+
+  /* Respect users who prefer reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  .section-shell {
+    @apply mx-auto w-full max-w-content px-6 md:px-10;
+  }
+
+  .eyebrow {
+    @apply text-xs font-medium uppercase tracking-[0.28em] text-accent-soft;
+  }
+
+  /* Oversized editorial heading, split-line friendly. */
+  .display-heading {
+    @apply font-sans font-semibold uppercase leading-[0.9] tracking-tight;
+    font-size: theme('fontSize.display');
+  }
+
+  /* Section-level oversized heading. */
+  .display-sm-heading {
+    @apply font-sans font-semibold uppercase leading-[0.95] tracking-tight;
+    font-size: theme('fontSize.display-sm');
+  }
+
+  /* Thin grid line divider used between chapters. */
+  .chapter-rule {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-ink/15 to-transparent;
+  }
+
+  /* --- Actions: squared, typographic, no scale-on-hover. --- */
+  .btn-solid {
+    @apply inline-flex items-center gap-3 bg-accent px-6 py-3.5 font-mono text-[11px]
+           uppercase tracking-[0.2em] text-ink transition-colors duration-300
+           hover:bg-accent-soft;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center gap-3 border border-ink/20 px-6 py-3.5 font-mono
+           text-[11px] uppercase tracking-[0.2em] text-ink-soft transition-colors
+           duration-300 hover:border-ink/50 hover:text-ink;
+  }
+
+  /* Inline text action with an arrow that slides on hover.
+     Pair with the `group` class in markup for the arrow transition. */
+  .link-action {
+    @apply inline-flex items-center gap-2 font-mono text-[11px] uppercase
+           tracking-[0.2em] text-ink-soft transition-colors duration-300 hover:text-accent-soft;
+  }
+
+  .link-action-arrow {
+    @apply inline-block transition-transform duration-300 group-hover/link:translate-x-1;
+  }
+
+  /* Monospace metadata line, used instead of pill/chip tags. */
+  .meta-line {
+    @apply font-mono text-[11px] uppercase tracking-[0.18em] text-ink-faint;
+  }
+}
