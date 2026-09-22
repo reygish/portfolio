@@ -221,6 +221,15 @@ function useGallery(urls: string[]): Photo[] {
   return photos;
 }
 
+/** Base orbit radius for the photo cards. */
+const PHOTO_RADIUS = 1.55;
+
+/** Deterministic 0→1 value per index, so layout is stable across renders. */
+function hashUnit(n: number): number {
+  const v = Math.sin(n * 12.9898) * 43758.5453;
+  return v - Math.floor(v);
+}
+
 /** Evenly spaced points on a sphere, so cards never clump. */
 function spherePoint(i: number, total: number, radius: number) {
   const phi = Math.acos(1 - (2 * (i + 0.5)) / total);
@@ -300,14 +309,19 @@ function PhotoCloud({ rig }: { rig: React.MutableRefObject<RigState> }) {
 
   const photos = useGallery(urls);
 
-  const layout = useMemo(
-    () =>
-      photos.map((_, i) => ({
-        position: spherePoint(i, Math.max(photos.length, 3), 0.95),
-        offset: (i / Math.max(photos.length, 1)) * 0.15,
-      })),
-    [photos.length],
-  );
+  const layout = useMemo(() => {
+    const count = photos.length;
+    const total = Math.max(count, 3);
+    // Widen the orbit as the album grows so cards keep their spacing.
+    const radius = PHOTO_RADIUS * Math.max(1, Math.sqrt(count / 8));
+
+    return photos.map((_, i) => ({
+      // Jitter the radius so cards sit at varied depths instead of on one
+      // shell, which keeps them from stacking up when projected to screen.
+      position: spherePoint(i, total, radius + (hashUnit(i) - 0.5) * 0.3),
+      offset: (i / Math.max(count, 1)) * 0.15,
+    }));
+  }, [photos.length]);
 
   if (photos.length === 0) return null;
 
