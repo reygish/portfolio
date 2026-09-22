@@ -56,6 +56,12 @@ export interface Profile {
    * hero core. Omit (or leave the file missing) and the core simply shows
    * particles instead — nothing breaks.
    */
+  /**
+   * Photos suspended throughout the core, revealed as the shell opens.
+   * Any that fail to load are skipped, so a partial set is fine.
+   */
+  gallery?: string[];
+  /** Fallback used only when `gallery` is empty. */
   portrait?: string;
   /** Path to a CV/resume in /public, e.g. "/CV.pdf". */
   cv?: string;

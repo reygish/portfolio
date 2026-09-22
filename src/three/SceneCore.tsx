@@ -125,7 +125,7 @@ function Shell({ rig }: { rig: React.MutableRefObject<RigState> }) {
   );
 }
 
-const portraitVertex = /* glsl */ `
+const photoVertex = /* glsl */ `
   varying vec2 vUv;
   void main() {
     vUv = uv;
@@ -133,10 +133,11 @@ const portraitVertex = /* glsl */ `
   }
 `;
 
-const portraitFragment = /* glsl */ `
+const photoFragment = /* glsl */ `
   uniform sampler2D uMap;
   uniform float uReveal;
   uniform float uTime;
+  uniform float uOffset;
   uniform vec3 uTint;
   varying vec2 vUv;
 
@@ -146,112 +147,182 @@ const portraitFragment = /* glsl */ `
     // Desaturate, then push it into the accent hue: a projected hologram
     // rather than a photograph pasted into the scene.
     float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
-    vec3 holo = mix(vec3(lum), uTint * (0.35 + lum * 1.5), 0.8);
+    vec3 holo = mix(vec3(lum), uTint * (0.35 + lum * 1.5), 0.72);
 
     // Fine scanlines + a slow sweeping band.
-    float scan = 0.88 + 0.12 * sin(vUv.y * 460.0 + uTime * 2.2);
+    float scan = 0.88 + 0.12 * sin(vUv.y * 320.0 + uTime * 2.2);
     holo *= scan;
-    float sweep = smoothstep(0.03, 0.0, abs(fract(vUv.y * 0.5 - uTime * 0.08) - 0.5) - 0.47);
+    float sweep = smoothstep(0.03, 0.0, abs(fract(vUv.y * 0.5 - uTime * 0.08 + uOffset) - 0.5) - 0.47);
     holo += uTint * sweep * 0.5;
 
-    // Occasional interlace flicker.
-    holo *= 0.94 + 0.06 * sin(uTime * 24.0);
+    // Occasional interlace flicker, desynced per card.
+    holo *= 0.94 + 0.06 * sin(uTime * 24.0 + uOffset * 40.0);
 
-    // Feather the rectangle away so the projection dissolves into the
-    // particles instead of ending on a hard edge.
-    float radial = 1.0 - smoothstep(0.34, 0.62, length(vUv - 0.5));
+    // Feather the rectangle away so each frame dissolves into the particles
+    // instead of ending on a hard edge.
     vec2 d = abs(vUv - 0.5) * 2.0;
-    float frame = (1.0 - smoothstep(0.72, 1.0, d.x)) * (1.0 - smoothstep(0.78, 1.0, d.y));
+    float frame = (1.0 - smoothstep(0.62, 1.0, d.x)) * (1.0 - smoothstep(0.62, 1.0, d.y));
 
-    // Only resolves once the shell has actually opened.
-    float gate = smoothstep(0.25, 0.85, uReveal);
+    // Cards resolve in sequence as the shell opens.
+    float gate = smoothstep(0.2 + uOffset, 0.8 + uOffset, uReveal);
 
-    float alpha = tex.a * gate * radial * frame * 0.95;
+    float alpha = tex.a * gate * frame * 0.9;
     gl_FragColor = vec4(holo, alpha);
   }
 `;
 
-/** Loads the portrait, tolerating a missing file without breaking the scene. */
-function usePortraitTexture(url?: string) {
-  const [texture, setTexture] = useState<THREE.Texture | null>(null);
-  const [aspect, setAspect] = useState(0.75);
+interface Photo {
+  texture: THREE.Texture;
+  aspect: number;
+}
+
+/**
+ * Loads every gallery image, skipping any that are missing so a partial set
+ * still renders. Results stream in as each file arrives.
+ */
+function useGallery(urls: string[]): Photo[] {
+  const [photos, setPhotos] = useState<Photo[]>([]);
 
   useEffect(() => {
-    if (!url) return;
+    if (urls.length === 0) return;
     let cancelled = false;
+    const loader = new THREE.TextureLoader();
+    const loaded: Photo[] = [];
 
-    new THREE.TextureLoader().load(
-      url,
-      (tex) => {
-        if (cancelled) {
-          tex.dispose();
-          return;
-        }
-        tex.colorSpace = THREE.SRGBColorSpace;
-        const img = tex.image as { width?: number; height?: number } | undefined;
-        if (img?.width && img?.height) setAspect(img.width / img.height);
-        setTexture(tex);
-      },
-      undefined,
-      () => {
-        // No portrait yet — the core stays purely particles.
-      },
-    );
+    urls.forEach((url) => {
+      loader.load(
+        url,
+        (tex) => {
+          if (cancelled) {
+            tex.dispose();
+            return;
+          }
+          tex.colorSpace = THREE.SRGBColorSpace;
+          const img = tex.image as
+            | { width?: number; height?: number }
+            | undefined;
+          const aspect =
+            img?.width && img?.height ? img.width / img.height : 0.75;
+          loaded.push({ texture: tex, aspect });
+          setPhotos([...loaded]);
+        },
+        undefined,
+        () => {
+          // Missing file — skip it.
+        },
+      );
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [urls]);
 
-  return { texture, aspect };
+  return photos;
 }
 
-function Portrait({ rig }: { rig: React.MutableRefObject<RigState> }) {
-  const { texture, aspect } = usePortraitTexture(profile.portrait);
+/** Evenly spaced points on a sphere, so cards never clump. */
+function spherePoint(i: number, total: number, radius: number) {
+  const phi = Math.acos(1 - (2 * (i + 0.5)) / total);
+  const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+  return new THREE.Vector3(
+    radius * Math.sin(phi) * Math.cos(theta),
+    radius * Math.sin(phi) * Math.sin(theta),
+    radius * Math.cos(phi),
+  );
+}
+
+function PhotoCard({
+  photo,
+  position,
+  offset,
+  rig,
+}: {
+  photo: Photo;
+  position: THREE.Vector3;
+  offset: number;
+  rig: React.MutableRefObject<RigState>;
+}) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const meshRef = useRef<THREE.Mesh>(null);
 
   const uniforms = useMemo(
     () => ({
-      uMap: { value: null as THREE.Texture | null },
+      uMap: { value: photo.texture },
       uReveal: { value: 0 },
       uTime: { value: 0 },
+      uOffset: { value: offset },
       uTint: { value: new THREE.Color('#7ea8ff') },
     }),
-    [],
+    [photo.texture, offset],
   );
 
-  useEffect(() => {
-    if (texture && matRef.current) {
-      matRef.current.uniforms.uMap.value = texture;
-    }
-  }, [texture]);
-
   useFrame((state) => {
-    if (!matRef.current) return;
     const { reveal, dim } = rig.current;
     const gate = reveal * (1 - dim);
-    matRef.current.uniforms.uReveal.value = gate;
-    matRef.current.uniforms.uTime.value = state.clock.elapsedTime;
-    if (meshRef.current) meshRef.current.visible = gate > 0.02;
+
+    if (matRef.current) {
+      matRef.current.uniforms.uReveal.value = gate;
+      matRef.current.uniforms.uTime.value = state.clock.elapsedTime;
+    }
+    if (meshRef.current) {
+      meshRef.current.visible = gate > 0.02;
+      // Face the viewer regardless of how the core has rotated, so the photos
+      // stay readable while their positions orbit.
+      meshRef.current.lookAt(state.camera.position);
+    }
   });
 
-  if (!texture) return null;
-
-  const height = 1.95;
+  const height = 0.62;
   return (
-    <mesh ref={meshRef}>
-      <planeGeometry args={[height * aspect, height]} />
+    <mesh ref={meshRef} position={position}>
+      <planeGeometry args={[height * photo.aspect, height]} />
       <shaderMaterial
         ref={matRef}
-        vertexShader={portraitVertex}
-        fragmentShader={portraitFragment}
+        vertexShader={photoVertex}
+        fragmentShader={photoFragment}
         uniforms={uniforms}
         transparent
         depthWrite={false}
         blending={THREE.AdditiveBlending}
       />
     </mesh>
+  );
+}
+
+/** An album of photos suspended throughout the core. */
+function PhotoCloud({ rig }: { rig: React.MutableRefObject<RigState> }) {
+  const urls = useMemo(() => {
+    const gallery = profile.gallery ?? [];
+    if (gallery.length > 0) return gallery;
+    return profile.portrait ? [profile.portrait] : [];
+  }, []);
+
+  const photos = useGallery(urls);
+
+  const layout = useMemo(
+    () =>
+      photos.map((_, i) => ({
+        position: spherePoint(i, Math.max(photos.length, 3), 0.95),
+        offset: (i / Math.max(photos.length, 1)) * 0.15,
+      })),
+    [photos.length],
+  );
+
+  if (photos.length === 0) return null;
+
+  return (
+    <group>
+      {photos.map((photo, i) => (
+        <PhotoCard
+          key={i}
+          photo={photo}
+          position={layout[i].position}
+          offset={layout[i].offset}
+          rig={rig}
+        />
+      ))}
+    </group>
   );
 }
 
@@ -436,7 +507,7 @@ function RevealRig() {
     <group ref={groupRef} position={[0, START_Y, 0]} scale={START_SCALE}>
       <Glow rig={rig} />
       <Core rig={rig} />
-      <Portrait rig={rig} />
+      <PhotoCloud rig={rig} />
       <Shell rig={rig} />
     </group>
   );
